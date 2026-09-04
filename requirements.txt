@@ -1,0 +1,4 @@
+# Dépendances Python du projet (voir README.md pour l'installation)
+flask>=2.0
+opencv-python>=4.5
+numpy>=1.20

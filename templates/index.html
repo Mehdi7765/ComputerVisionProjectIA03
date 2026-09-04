@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Détection d'objets en temps réel</title>
+<style>
+  :root { --fond:#0f1115; --carte:#1a1d24; --bord:#2a2f3a; --texte:#e8eaf0; --sourd:#9aa3b5; --accent:#4f9cff; --ok:#3ddc84; --ko:#ff5a5a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--fond); color:var(--texte); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.9rem 1.2rem; border-bottom:1px solid var(--bord); flex-wrap:wrap; }
+  header h1 { font-size:1.15rem; margin:0; font-weight:600; }
+  .badge { display:inline-flex; align-items:center; gap:.4rem; font-size:.85rem; color:var(--sourd); }
+  .badge i { width:.6rem; height:.6rem; border-radius:50%; background:var(--ko); display:inline-block; }
+  .badge.ok i { background:var(--ok); }
+  main { display:grid; grid-template-columns: minmax(0,1fr) 320px; gap:1rem; padding:1rem 1.2rem; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .video { background:#000; border-radius:10px; overflow:hidden; border:1px solid var(--bord); min-height:200px; display:flex; align-items:center; justify-content:center; }
+  .video img { width:100%; display:block; }
+  .carte { background:var(--carte); border:1px solid var(--bord); border-radius:10px; padding:.9rem 1rem; margin-bottom:1rem; }
+  .carte h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--sourd); margin:0 0 .6rem; font-weight:600; }
+  .tuiles { display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; }
+  .tuile { background:var(--fond); border:1px solid var(--bord); border-radius:8px; padding:.55rem .6rem; text-align:center; }
+  .tuile b { display:block; font-size:1.35rem; font-weight:600; }
+  .tuile span { font-size:.72rem; color:var(--sourd); }
+  ul.objets { list-style:none; margin:0; padding:0; font-size:.9rem; }
+  ul.objets li { display:flex; justify-content:space-between; padding:.25rem 0; border-bottom:1px dashed var(--bord); }
+  ul.objets li:last-child { border-bottom:0; }
+  label { display:block; font-size:.82rem; color:var(--sourd); margin:.5rem 0 .25rem; }
+  input[type=range] { width:100%; }
+  select, input[type=text] { width:100%; padding:.45rem .55rem; border-radius:6px; border:1px solid var(--bord); background:var(--fond); color:var(--texte); font-size:.9rem; }
+  .boutons { display:flex; gap:.5rem; margin-top:.8rem; }
+  button { flex:1; padding:.5rem; border:0; border-radius:6px; cursor:pointer; font-size:.9rem; font-weight:600; }
+  button.principal { background:var(--accent); color:#fff; }
+  button.secondaire { background:var(--bord); color:var(--texte); }
+  .message { font-size:.8rem; margin-top:.5rem; min-height:1.1rem; color:var(--sourd); }
+  .message.erreur { color:var(--ko); }
+  footer { padding:.6rem 1.2rem 1.2rem; font-size:.78rem; color:var(--sourd); }
+  code { background:var(--bord); padding:.1rem .35rem; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Détection d'objets en temps réel &mdash; YOLOv4-tiny</h1>
+  <span class="badge" id="etat"><i></i><span>connexion à la source…</span></span>
+</header>
+
+<main>
+  <!-- Flux vidéo annoté : une simple balise <img> suffit pour du MJPEG -->
+  <section class="video">
+    <img id="flux" src="/video_feed" alt="flux vidéo annoté">
+  </section>
+
+  <aside>
+    <div class="carte">
+      <h2>Performances</h2>
+      <div class="tuiles">
+        <div class="tuile"><b id="fps">–</b><span>images / s</span></div>
+        <div class="tuile"><b id="latence">–</b><span>ms / image</span></div>
+        <div class="tuile"><b id="nb">–</b><span>objets</span></div>
+      </div>
+    </div>
+
+    <div class="carte">
+      <h2>Objets détectés</h2>
+      <ul class="objets" id="liste"><li><span>aucun pour l'instant</span></li></ul>
+    </div>
+
+    <div class="carte">
+      <h2>Réglages (appliqués à chaud)</h2>
+      <label>Seuil de confiance : <b id="seuilValeur">0.50</b></label>
+      <input type="range" id="seuil" min="0.05" max="0.95" step="0.05" value="0.5">
+
+      <label>Taille d'entrée du réseau (vitesse ⇄ précision)</label>
+      <select id="taille"></select>
+
+      <label>Classes à détecter (vide = toutes)</label>
+      <input type="text" id="classes" list="listeClasses" placeholder="ex : person, car, dog">
+      <datalist id="listeClasses"></datalist>
+
+      <div class="boutons">
+        <button class="principal" id="appliquer">Appliquer</button>
+        <button class="secondaire" id="reinit">Toutes les classes</button>
+      </div>
+      <div class="message" id="message"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  Source : <code id="source">…</code> &middot; résolution <span id="resolution">–</span>
+  &middot; flux seul : <code>/video_feed</code> &middot; stats : <code>/stats</code>
+</footer>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ---- Statistiques : rafraîchies 2 fois par seconde ----
+  async function majStats() {
+    try {
+      const s = await (await fetch('/stats', {cache: 'no-store'})).json();
+      $('fps').textContent = s.fps.toFixed(1);
+      $('latence').textContent = s.latence_ms;
+      $('nb').textContent = s.nb_objets;
+      $('source').textContent = s.source;
+      $('resolution').textContent = s.resolution || '–';
+      const badge = $('etat');
+      badge.classList.toggle('ok', s.source_connectee);
+      badge.querySelector('span').textContent = s.source_connectee ? 'source connectée' : 'source coupée, reconnexion…';
+      const entrees = Object.entries(s.objets_par_classe);
+      $('liste').innerHTML = entrees.length
+        ? entrees.map(([c, n]) => `<li><span>${c}</span><b>${n}</b></li>`).join('')
+        : '<li><span>aucun objet détecté</span></li>';
+    } catch (e) { /* serveur momentanément injoignable : on réessaie au prochain tick */ }
+  }
+  setInterval(majStats, 500);
+  majStats();
+
+  // ---- Reprise automatique du flux si la connexion est perdue ----
+  $('flux').addEventListener('error', () => {
+    setTimeout(() => { $('flux').src = '/video_feed?t=' + Date.now(); }, 2000);
+  });
+
+  // ---- Réglages ----
+  $('seuil').addEventListener('input', e => $('seuilValeur').textContent = (+e.target.value).toFixed(2));
+
+  function afficherParametres(p) {
+    $('seuil').value = p.seuil_confiance;
+    $('seuilValeur').textContent = (+p.seuil_confiance).toFixed(2);
+    $('taille').innerHTML = p.tailles_possibles.map(t =>
+      `<option value="${t}" ${t === p.taille_entree ? 'selected' : ''}>${t} px${t === 320 ? ' (rapide)' : t === 608 ? ' (précis)' : ' (équilibré)'}</option>`).join('');
+    $('classes').value = p.classes_filtre.join(', ');
+    $('listeClasses').innerHTML = p.toutes_les_classes.map(c => `<option value="${c}">`).join('');
+  }
+
+  async function chargerParametres() {
+    afficherParametres(await (await fetch('/parametres')).json());
+  }
+
+  async function envoyerParametres(corps) {
+    const r = await fetch('/parametres', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corps)
+    });
+    const p = await r.json();
+    const msg = $('message');
+    if (p.erreurs && p.erreurs.length) { msg.textContent = p.erreurs.join(' · '); msg.classList.add('erreur'); }
+    else { msg.textContent = 'Réglages appliqués.'; msg.classList.remove('erreur'); afficherParametres(p); }
+  }
+
+  $('appliquer').addEventListener('click', () => envoyerParametres({
+    seuil_confiance: $('seuil').value,
+    taille_entree: $('taille').value,
+    classes: $('classes').value
+  }));
+  $('reinit').addEventListener('click', () => { $('classes').value = ''; envoyerParametres({classes: ''}); });
+
+  chargerParametres();
+</script>
+</body>
+</html>
