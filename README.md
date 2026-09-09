@@ -1,5 +1,7 @@
 # Architecture distribuée pour le traitement d'images — IA03
 
+*Mehdi Ez-Zouak, Paul Louis Ledoux, Clément Menaucourt — UTT, année 2, septembre 2026.*
+
 Détection d'objets **en temps réel** sur un flux vidéo, répartie sur plusieurs machines d'un réseau local :
 
 - une machine **capture** la webcam et la diffuse (`diffusion_http.py`) ;

@@ -4,7 +4,7 @@ Objectif : le prof se connecte au réseau avec son téléphone, ouvre une adress
 
 ## La veille
 
-- [ ] Le binôme est ajouté comme **collaborateur** du dépôt privé (GitHub → Settings → Collaborators), et a fait `git clone` + installation (voir README § 3) sur **son** PC.
+- [ ] Paul Louis et Clément sont ajoutés comme **collaborateurs** du dépôt privé (GitHub → Settings → Collaborators), et chacun a fait `git clone` + installation (voir README § 3) sur **son** PC.
 - [ ] Sur chaque PC, test en solo : `python lecture_http.py --source 0` → l'interface s'affiche sur `http://localhost:8000/` avec des boîtes.
 - [ ] **Pare-feu** ouvert sur les deux PC (ports 5000 et 8000 en entrée). Windows : PowerShell administrateur
       `New-NetFirewallRule -DisplayName "IA03" -Direction Inbound -LocalPort 5000,8000 -Protocol TCP -Action Allow`

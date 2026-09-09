@@ -2,7 +2,7 @@
 
 **IA03 — Projet 1 · Rapport**
 
-Auteurs : Mehdi Ez-Zouak et *[nom du binôme]* · UTT, année 2 · septembre 2026
+Auteurs : Mehdi Ez-Zouak, Paul Louis Ledoux et Clément Menaucourt · UTT, année 2 · septembre 2026
 
 Dépôt du code : <https://github.com/Mehdi7765/ComputerVisionProjectIA03>
 
