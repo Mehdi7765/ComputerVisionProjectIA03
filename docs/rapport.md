@@ -48,13 +48,17 @@ Le détecteur (`detecteur.py`) encapsule le modèle **YOLOv4-tiny** exécuté pa
 
 ### 2.4 La consultation : interface web
 
-![Figure 2](captures/interface_web.jpg)
+![Figure 2](captures/demo_equipe.jpg)
 
-*Figure 2 — Interface de consultation sur un PC : flux annoté (personnes, camion, voiture), indicateurs en direct (images/s, latence d'inférence, nombre d'objets, compteur par classe) et réglages appliqués à chaud.*
+*Figure 2 — Interface de consultation pendant un essai de l'équipe, webcam du PC capture : trois personnes et un téléphone détectés, indicateurs en direct (7 images/s, 104 ms d'inférence), réglages appliqués à chaud.*
 
-![Figure 3](captures/interface_mobile.jpg)
+![Figure 3](captures/interface_web.jpg)
 
-*Figure 3 — La même interface sur un téléphone : la mise en page s'adapte à la largeur de l'écran.*
+*Figure 3 — Même interface sur une scène dense (vidéo d'exemple d'OpenCV diffusée à la place de la webcam avec `--camera vtest.avi`) : sept personnes, un camion et une voiture localisés simultanément.*
+
+![Figure 4](captures/interface_mobile.jpg)
+
+*Figure 4 — La même interface sur un téléphone : la mise en page s'adapte à la largeur de l'écran.*
 
 La page ne dépend d'aucune ressource extérieure (pas de CDN), ce qui garantit qu'elle fonctionne sur un réseau local sans accès Internet. Elle interroge `/stats` deux fois par seconde et relance l'image du flux d'elle-même en cas de coupure.
 
