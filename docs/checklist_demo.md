@@ -7,8 +7,8 @@ Objectif : le prof se connecte au réseau avec son téléphone, ouvre une adress
 - [ ] Paul Louis et Clément sont ajoutés comme **collaborateurs** du dépôt privé (GitHub → Settings → Collaborators), et chacun a fait `git clone` + installation (voir README § 3) sur **son** PC.
 - [ ] Sur chaque PC, test en solo : `python lecture_http.py --source 0` → l'interface s'affiche sur `http://localhost:8000/` avec des boîtes.
 - [ ] **Pare-feu** ouvert sur les deux PC (ports 5000 et 8000 en entrée). Windows : PowerShell administrateur
-      `New-NetFirewallRule -DisplayName "IA03" -Direction Inbound -LocalPort 5000,8000 -Protocol TCP -Action Allow`
-      Linux : `sudo ufw allow 5000,8000/tcp` (ou rien si `ufw` est absent).
+      `New-NetFirewallRule -DisplayName "IA03" -Direction Inbound -LocalPort 5000,8000,8001 -Protocol TCP -Action Allow`
+      Linux : `sudo ufw allow 5000,8000,8001/tcp` (ou rien si `ufw` est absent).
 - [ ] Test à deux PC sur le réseau prévu : capture sur l'un, analyse sur l'autre, consultation depuis un téléphone. Si le `ping` entre les PC échoue → le réseau isole les clients : prévoir un **partage de connexion** (voir plan B).
 - [ ] Chargeurs branchés le jour J (l'analyse consomme du CPU, un portable sur batterie ralentit).
 - [ ] Une vidéo de secours sur le PC capture (`--camera video.mp4`) si la webcam pose problème.
@@ -18,6 +18,7 @@ Objectif : le prof se connecte au réseau avec son téléphone, ouvre une adress
 1. **Réseau** : les deux PC et le téléphone du prof sur le **même Wi-Fi**. Si le Wi-Fi de l'école isole les clients, ouvrir un partage de connexion sur un téléphone et y connecter les deux PC ; le prof s'y connectera aussi (lui donner le mot de passe du partage).
 2. **PC capture** : `python diffusion_http.py` → noter l'adresse affichée (`http://<IP>:5000/video_feed`). Vérifier dans son navigateur que `http://localhost:5000/` montre la webcam.
 3. **PC analyse** : `python lecture_http.py --source http://<IP capture>:5000/video_feed` → attendre « PC ANALYSE prêt ». Le terminal affiche l'adresse `http://<IP analyse>:8000/` **et un QR code**.
+   Avec **deux PC capture** : un second terminal avec `--source http://<IP capture 2>:5000/video_feed --port 8001` (pare-feu : ouvrir aussi 8001).
 4. **Vérification croisée** avant l'arrivée du prof : ouvrir `http://<IP analyse>:8000/` depuis un téléphone à nous. Si ça marche, ça marchera pour le prof.
 5. **Prof** : lui montrer le QR code (ou lui dicter l'adresse). Ne rien toucher.
 

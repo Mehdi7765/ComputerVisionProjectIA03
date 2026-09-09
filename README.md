@@ -180,6 +180,17 @@ http://192.168.1.30:8000/
 
 On voit le flux annoté en direct, les images par seconde, la latence, le nombre d'objets, et on peut modifier les réglages. Plusieurs spectateurs peuvent regarder en même temps.
 
+### Plusieurs caméras (ex. deux PC capture, un PC analyse)
+
+Chaque PC capture lance `python diffusion_http.py` (même port 5000, machines différentes). Le PC analyse lance **une analyse par caméra**, sur des ports différents, dans deux terminaux :
+
+```bash
+python lecture_http.py --source http://192.168.1.20:5000/video_feed --port 8000
+python lecture_http.py --source http://192.168.1.21:5000/video_feed --port 8001
+```
+
+Consultation : `http://<IP analyse>:8000/` pour la première caméra, `http://<IP analyse>:8001/` pour la seconde. Ouvrir les ports 8000 et 8001 dans le pare-feu du PC analyse. Deux modèles tournent en parallèle : ajouter `--taille 320` si le PC analyse peine.
+
 ### Test sur une seule machine
 
 Pour vérifier l'installation sans réseau, dans deux terminaux :
@@ -224,7 +235,7 @@ curl -m 5 http://192.168.1.20:5000/etat    # le serveur répond-il ?
 | Symptôme | Cause probable | Solution |
 |---|---|---|
 | `Connection refused` immédiat | Le script serveur n'est pas lancé, ou mauvais port | Lancer `diffusion_http.py` / `lecture_http.py`, vérifier le port |
-| **Aucune réponse, délai qui expire** (le `ping` peut échouer aussi) | **Pare-feu du PC serveur** qui bloque les connexions entrantes. Cas le plus fréquent, surtout sous Windows | Windows : autoriser Python quand la fenêtre du pare-feu apparaît (réseaux privés), ou en PowerShell administrateur `New-NetFirewallRule -DisplayName "IA03" -Direction Inbound -LocalPort 5000,8000 -Protocol TCP -Action Allow`. Linux : `sudo ufw allow 5000,8000/tcp` |
+| **Aucune réponse, délai qui expire** (le `ping` peut échouer aussi) | **Pare-feu du PC serveur** qui bloque les connexions entrantes. Cas le plus fréquent, surtout sous Windows | Windows : autoriser Python quand la fenêtre du pare-feu apparaît (réseaux privés), ou en PowerShell administrateur `New-NetFirewallRule -DisplayName "IA03" -Direction Inbound -LocalPort 5000,8000,8001 -Protocol TCP -Action Allow`. Linux : `sudo ufw allow 5000,8000,8001/tcp` |
 | Le `ping` passe vers Internet mais pas entre nos PC | Isolation des clients activée sur le point d'accès (fréquent sur les partages de connexion et Wi-Fi publics) | Utiliser une box / un routeur, ou un partage de connexion sans isolation |
 | Badge « source coupée, reconnexion… » sur l'interface | `diffusion_http.py` arrêté, ou l'IP du PC capture a changé | Relancer `diffusion_http.py`, relire son adresse, relancer `lecture_http.py --source ...`. La reconnexion est automatique une fois la source revenue |
 | « Impossible d'ouvrir la source 0 » | Webcam utilisée par une autre application, ou autre index | Fermer Teams/Zoom/navigateur, essayer `--camera 1` |
