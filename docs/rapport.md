@@ -1,180 +1,155 @@
 # Architecture distribuée pour le traitement d'images
 
-**IA03 — Projet 1 · Rapport**
+**IA03 — Projet 1 — Rapport**
 
-Auteurs : Mehdi Ez-Zouak, Paul Louis Ledoux et Clément Menaucourt · UTT, année 2 · septembre 2026
+Mehdi Ez-Zouak, Paul Louis Ledoux et Clément Menaucourt — UTT, septembre 2026
 
-Dépôt du code : <https://github.com/Mehdi7765/ComputerVisionProjectIA03>
+Code du projet : <https://github.com/Mehdi7765/ComputerVisionProjectIA03>
 
 ---
 
-## 1. Objectif
+## 1. Ce qu'on devait faire
 
-Mettre en place une chaîne de traitement d'images **répartie sur plusieurs machines** d'un réseau local : une machine capture une webcam et diffuse le flux vidéo, une seconde applique un modèle de détection d'objets à chaque image, et n'importe quel appareil du réseau consulte le résultat annoté, en direct, avec un simple navigateur.
+Le but du projet était de faire tourner une chaîne de traitement d'images sur plusieurs ordinateurs en même temps : un PC qui filme avec sa webcam et envoie la vidéo sur le réseau, un autre PC qui récupère cette vidéo et fait tourner un modèle de détection d'objets dessus, et enfin un moyen de regarder le résultat depuis n'importe quel appareil connecté au même Wi-Fi, avec juste un navigateur.
 
-Le projet part des quatre scripts fournis en TP (`diffusion_http.py`, `lecture_http.py`, `diffusion_gstreamer.py`, `diffusion_rtsp_ffmpeg.py`), qui ont été conservés et adaptés. Chaque modification est repérée dans le code par un commentaire `[MODIF]` accompagné de sa raison, et les versions d'origine sont fournies dans `docs/scripts_origine/`.
+On est partis des quatre scripts donnés en TP (`diffusion_http.py`, `lecture_http.py`, `diffusion_gstreamer.py` et `diffusion_rtsp_ffmpeg.py`). On les a gardés avec leurs noms et on les a modifiés au fur et à mesure. Pour s'y retrouver, chaque changement dans le code est marqué par un commentaire `[MODIF]` qui explique pourquoi on l'a fait, et on a laissé les versions d'origine dans `docs/scripts_origine/` pour pouvoir comparer.
 
-## 2. Description de la solution
+## 2. Comment ça marche
 
 ### 2.1 Vue d'ensemble
 
 ![Figure 1](figures/architecture.png)
 
-*Figure 1 — Architecture réellement déployée : trois rôles sur trois machines distinctes, reliés par HTTP. Les adresses sont des exemples ; les scripts affichent les vraies adresses au démarrage.*
+*Figure 1 — Les trois machines et ce qui circule entre elles. Les adresses IP sont des exemples, les vraies changent selon le réseau sur lequel on se connecte.*
 
-La chaîne se compose de trois rôles, chacun porté par un script indépendant. N'importe quel ordinateur peut tenir n'importe quel rôle : il suffit de lancer le script correspondant.
+Il y a trois rôles, et chacun correspond à un script :
 
-| Rôle | Machine | Script | Entrée | Sortie |
-|---|---|---|---|---|
-| **Capture** | PC avec webcam | `diffusion_http.py` | webcam USB (640×480) | flux MJPEG brut, port 5000 |
-| **Analyse** | PC avec CPU | `lecture_http.py` | flux brut du PC capture | flux MJPEG annoté + page web, port 8000 |
-| **Consultation** | téléphone, PC, tablette | *(aucun)* | page web du PC analyse | affichage dans le navigateur |
+- le **PC capture** fait tourner `diffusion_http.py`. Il lit la webcam et envoie les images sur le réseau (port 5000) ;
+- le **PC analyse** fait tourner `lecture_http.py`. Il récupère les images du PC capture, passe chaque image dans YOLO, dessine les boîtes et renvoie l'image annotée sur le réseau avec une petite page web (port 8000) ;
+- la **consultation**, c'est n'importe quel téléphone ou PC qui ouvre la page web du PC analyse. Il n'y a rien à installer.
 
-### 2.2 Le PC capture : `diffusion_http.py`
+Un point qui nous paraissait important : n'importe quel ordinateur peut jouer n'importe quel rôle, il suffit de lancer le bon script. Pendant nos essais on a d'ailleurs changé plusieurs fois de PC capture selon qui avait la meilleure webcam. On a aussi testé avec deux PC capture et un seul PC analyse, qui lance alors deux analyses sur deux ports différents.
 
-Le script ouvre la webcam avec OpenCV et sert un flux **MJPEG** avec Flask : chaque image est compressée en JPEG et envoyée dans une réponse HTTP de type `multipart/x-mixed-replace`, ce qu'un navigateur affiche avec une simple balise `<img>` et qu'OpenCV lit avec `cv2.VideoCapture(url)`.
+### 2.2 Le PC capture
 
-Par rapport au script d'origine, la modification la plus importante concerne l'ouverture de la caméra. Dans la version fournie, `cv2.VideoCapture(0)` était appelé à l'intérieur de `generate_frames()`, donc **à chaque client HTTP** : avec une seule webcam physique, seul le premier client pouvait l'ouvrir, ce qui interdisait d'avoir à la fois le PC d'analyse et un navigateur de contrôle. La caméra est maintenant ouverte **une seule fois** et lue par un thread ; chaque client reçoit la dernière image capturée. Un mécanisme de reprise automatique relance l'ouverture si la caméra coupe.
+`diffusion_http.py` ouvre la webcam avec OpenCV et sert un flux MJPEG avec Flask. Concrètement, chaque image est compressée en JPEG et envoyée dans une réponse HTTP qui ne se termine jamais (type `multipart/x-mixed-replace`). C'est un format un peu vieux mais qui a un gros avantage : un navigateur l'affiche directement avec une balise `<img>`, et OpenCV sait le lire avec `cv2.VideoCapture(url)`.
 
-### 2.3 Le PC analyse : `lecture_http.py`
+La modification la plus importante par rapport au script du TP concerne l'ouverture de la caméra. Dans la version d'origine, `cv2.VideoCapture(0)` était appelé dans la fonction `generate_frames()`, donc à chaque fois qu'un client se connectait. Avec une seule webcam, seul le premier client arrivait à l'ouvrir, et le deuxième avait une erreur. On s'en est rendu compte quand on a voulu avoir en même temps le PC analyse et un navigateur pour vérifier que la webcam marchait. Maintenant la caméra est ouverte une seule fois au démarrage, un thread la lit en continu, et chaque client reçoit la dernière image lue. On a aussi ajouté une boucle qui réessaie d'ouvrir la caméra si elle est débranchée, pour ne pas avoir à relancer le script à la main.
 
-Le script d'origine lisait le flux, écrivait un texte fixe sur chaque image et l'affichait dans une fenêtre. L'emplacement prévu pour « modifier l'image » accueille maintenant la **détection d'objets**, et l'image annotée est **rediffusée** sur le réseau selon le même principe que `diffusion_http.py`. Trois fils d'exécution cohabitent :
+### 2.3 Le PC analyse
 
-1. un **lecteur** (`LecteurDerniereImage`, dans `utilitaires.py`) lit le flux du PC capture en continu et ne conserve que la dernière image reçue ;
-2. la **boucle d'analyse** prend cette image, appelle le détecteur, dessine les boîtes et un bandeau d'information, puis publie l'image annotée ;
-3. le **serveur web** Flask sert la page de consultation, le flux annoté et deux points d'accès JSON (`/stats` pour les indicateurs, `/parametres` pour lire et modifier les réglages).
+`lecture_http.py` est le script qui a le plus changé. Dans la version du TP, il lisait le flux, écrivait un texte fixe sur l'image avec `cv2.putText` et l'affichait dans une fenêtre. Le commentaire « modifier l'image » indiquait clairement où mettre le traitement, donc c'est là qu'on a mis la détection d'objets. Et comme une fenêtre OpenCV n'est visible que sur le PC lui-même, on a ajouté une rediffusion de l'image annotée sur le réseau, en reprenant le principe de `diffusion_http.py`.
 
-Le détecteur (`detecteur.py`) encapsule le modèle **YOLOv4-tiny** exécuté par le module DNN d'OpenCV sur le processeur. Pour chaque image : préparation d'un *blob* (mise à l'échelle, redimensionnement en 416×416, passage BGR → RGB), passage dans le réseau, décodage des sorties (coordonnées normalisées → pixels, classe la plus probable), puis suppression des boîtes redondantes (NMS). Le diffuseur (`diffuseur.py`) encode l'image annotée une seule fois en JPEG et la distribue à tous les spectateurs connectés.
+Au final le script fait trois choses en parallèle :
 
-### 2.4 La consultation : interface web
+1. un thread lit le flux du PC capture en continu, mais ne garde que la dernière image reçue (on explique pourquoi dans la partie 4) ;
+2. la boucle principale prend cette image, lance la détection, dessine les boîtes et un bandeau avec les images par seconde, puis publie l'image annotée ;
+3. un serveur Flask sert la page web, le flux annoté, et deux adresses en JSON : `/stats` pour les chiffres (images/s, latence, objets détectés) et `/parametres` pour lire ou changer les réglages.
+
+La détection est dans un fichier à part, `detecteur.py`. On utilise YOLOv4-tiny à travers le module DNN d'OpenCV, sur le processeur. Pour chaque image : on prépare un « blob » (les pixels sont ramenés entre 0 et 1, l'image est redimensionnée en 416×416 et passée de BGR en RGB), on fait passer ce blob dans le réseau, on récupère les boîtes avec leur classe et leur score, on enlève celles qui sont sous le seuil de confiance, puis on applique un NMS pour ne garder qu'une boîte par objet quand le réseau en propose plusieurs qui se recouvrent.
+
+### 2.4 La page web
 
 ![Figure 2](captures/demo_equipe.jpg)
 
-*Figure 2 — Interface de consultation pendant un essai de l'équipe, webcam du PC capture : trois personnes et un téléphone détectés, indicateurs en direct (7 images/s, 104 ms d'inférence), réglages appliqués à chaud.*
+*Figure 2 — La page de consultation pendant un de nos essais. Trois personnes et un téléphone sont détectés ; à droite les chiffres en direct et les réglages.*
 
 ![Figure 3](captures/interface_web.jpg)
 
-*Figure 3 — Même interface sur une scène dense (vidéo d'exemple d'OpenCV diffusée à la place de la webcam avec `--camera vtest.avi`) : sept personnes, un camion et une voiture localisés simultanément.*
+*Figure 3 — La même page avec une scène plus chargée. Ici on a diffusé une vidéo d'exemple d'OpenCV à la place de la webcam, avec l'option `--camera vtest.avi`.*
 
 ![Figure 4](captures/interface_mobile.jpg)
 
-*Figure 4 — La même interface sur un téléphone : la mise en page s'adapte à la largeur de l'écran.*
+*Figure 4 — Sur un téléphone, les blocs passent les uns sous les autres.*
 
-La page ne dépend d'aucune ressource extérieure (pas de CDN), ce qui garantit qu'elle fonctionne sur un réseau local sans accès Internet. Elle interroge `/stats` deux fois par seconde et relance l'image du flux d'elle-même en cas de coupure.
+La page est volontairement simple : l'image du flux, trois chiffres (images par seconde, temps de calcul par image, nombre d'objets), la liste des objets détectés par classe, et des réglages qu'on peut changer sans rien relancer. Elle ne charge rien depuis Internet, ce qui compte parce qu'en séance on n'est pas sûrs d'avoir un accès extérieur. Toutes les demi-secondes elle va chercher `/stats`, et si l'image du flux tombe elle la relance toute seule.
 
-### 2.5 Formats des échanges et ports
+### 2.5 Les paramètres
 
-| Échange | Format | Port | Pourquoi |
-|---|---|---|---|
-| Capture → analyse | MJPEG sur HTTP | 5000 | lisible par OpenCV et par un navigateur, un seul port TCP |
-| Analyse → spectateurs | MJPEG sur HTTP + HTML | 8000 | affichable sans logiciel, plusieurs spectateurs |
-| Spectateurs → analyse | JSON (`/parametres`) | 8000 | réglages à chaud, validation côté serveur |
-| Supervision | JSON (`/etat`, `/stats`) | 5000, 8000 | diagnostic depuis n'importe quelle machine avec `curl` |
+Tous les réglages sont dans un seul fichier, `config.py` : adresses, ports, résolution, qualité JPEG, seuils, liste des modèles. Chaque script accepte aussi des options en ligne de commande (`--source`, `--port`, `--camera`, etc.) qui passent devant ce fichier. On a fait ça après avoir perdu du temps à modifier des adresses dans le code en pleine séance, parce que l'adresse IP d'un PC change quand on change de Wi-Fi.
 
-Tous les paramètres réseau (adresses, ports, résolution, qualité, seuils, modèles) sont regroupés dans **`config.py`** ; chaque script accepte des options en ligne de commande qui prennent le dessus, si bien qu'aucune adresse n'est écrite en dur et qu'on peut changer de réseau en séance sans éditer le code.
+## 3. Pourquoi ces choix
 
-## 3. Justification des choix
+### 3.1 MJPEG plutôt que RTSP
 
-### 3.1 Protocole de diffusion : MJPEG sur HTTP, plutôt que RTSP/H.264
+Au début on pensait utiliser RTSP avec du H.264, puisque deux des scripts du TP étaient prévus pour ça et que c'est ce qu'utilisent les vraies caméras IP. On a fini par garder le MJPEG sur HTTP pour la diffusion principale, pour une raison simple : le prof doit pouvoir ouvrir le résultat sur son téléphone avec un navigateur, et un navigateur ne lit pas du RTSP. Il aurait fallu installer VLC, ou reconvertir le flux côté serveur, ce qui revient à faire du MJPEG de toute façon.
 
-Trois familles ont été considérées. Les deux variantes H.264 ont été **réellement implémentées et mesurées** (scripts `diffusion_rtsp_ffmpeg.py` et `diffusion_gstreamer.py`) avant d'être écartées comme diffusion principale.
+Le MJPEG a d'autres avantages qu'on a appréciés en pratique. Il n'utilise qu'un seul port TCP, donc une seule règle de pare-feu. Il se teste avec `curl`. Et il gère plusieurs clients sans effort. Son défaut, c'est le débit : on a mesuré environ 1,4 Mbit/s en 640×480 avec une qualité JPEG de 80, contre environ 0,5 Mbit/s pour les variantes H.264 réglées à 500 kbit/s. Sur un réseau local ça ne pose pas de problème.
 
-| Solution | Débit (640×480) | Lisible par un navigateur | Multi-clients | Dépendances | Verdict |
-|---|---|---|---|---|---|
-| **MJPEG / HTTP** (Flask + OpenCV) | ≈ 1,4 Mbit/s mesuré | **oui**, balise `<img>` | oui, trivial | Flask uniquement | **retenu** |
-| H.264 / HTTP-MPEG-TS via ffmpeg | ≈ 0,5 Mbit/s (cible x264) | non | un seul (mode `-listen`) | binaire ffmpeg | variante fournie |
-| H.264 / RTP-TCP via GStreamer | ≈ 0,5 Mbit/s (bitrate=500) | non | oui | OpenCV compilé avec GStreamer, sur les deux machines | variante fournie |
-| WebRTC | faible | oui | oui | serveur de signalisation, bibliothèque `aiortc` | écarté : complexité disproportionnée |
+On a quand même fait fonctionner les deux variantes H.264 (`diffusion_rtsp_ffmpeg.py` et `diffusion_gstreamer.py`), et `lecture_http.py` sait les lire avec l'option `--source`. Elles nous ont servi à comparer, et elles pourraient être utiles si le réseau était vraiment limité.
 
-Le critère décisif est l'**accessibilité depuis un simple navigateur**, sans logiciel ni plugin : seul le MJPEG le permet nativement. Il n'utilise qu'un port TCP (une seule règle de pare-feu), se déboguer avec `curl`, et son surcoût de débit (trois fois celui du H.264) est sans conséquence sur un réseau local. Le H.264 aurait imposé un lecteur (VLC) ou une conversion côté serveur, c'est-à-dire… une rediffusion en MJPEG. Les variantes H.264 restent utiles comme diffusion **capture → analyse** sur un réseau contraint : `lecture_http.py` sait les lire avec `--source`.
+On a aussi regardé WebRTC, qui serait la solution « propre » pour de la vidéo temps réel dans un navigateur, mais ça demandait un serveur de signalisation et une bibliothèque en plus, et on a estimé que c'était trop pour ce projet.
 
-### 3.2 Modèle : YOLOv4-tiny via OpenCV DNN, plutôt que YOLOv8
+### 3.2 YOLOv4-tiny avec OpenCV
 
-| Solution | Précision | Vitesse CPU | Installation | Verdict |
-|---|---|---|---|---|
-| **YOLOv4-tiny** (OpenCV DNN) | correcte, 80 classes COCO | 40–60 ms/image | aucune : OpenCV déjà présent, 24 Mo de poids inclus dans le dépôt | **retenu** |
-| YOLOv3-tiny (OpenCV DNN) | inférieure | comparable | idem, 34 Mo | fourni comme second modèle, changement à chaud |
-| YOLOv8n (ultralytics) | supérieure | 100–200 ms/image sur CPU | PyTorch ≈ 2 Go à télécharger | écarté : trop lourd pour un `git clone` en séance, plus lent sans GPU |
-| MobileNet-SSD (Caffe) | inférieure, 20 classes | rapide | légère | écarté : moins de classes, moins précis |
+Pour le modèle, la question était surtout de savoir ce qui tournerait en temps réel sur un portable sans carte graphique. On a d'abord pensé à YOLOv8 avec la bibliothèque ultralytics, qui est plus récent et plus précis, mais ça demandait d'installer PyTorch, soit à peu près 2 Go, sur chaque PC. Sur un partage de connexion, c'était déjà compliqué. Et sur CPU, YOLOv8 est nettement plus lent.
 
-YOLOv4-tiny offre le meilleur compromis pour une démonstration **en temps réel sur CPU** : il tient 15 à 20 images par seconde sur un portable, ne demande aucune dépendance au-delà d'OpenCV, et ses fichiers tiennent dans le dépôt Git. Le choix reste ouvert : la taille d'entrée (320/416/608) et le modèle (v4-tiny / v3-tiny) se changent depuis l'interface, ce qui permet de montrer le compromis vitesse/précision en direct.
+YOLOv4-tiny passe directement par le module DNN d'OpenCV, qui est déjà installé. Les fichiers du modèle font 24 Mo et sont dans le dépôt Git, donc un `git clone` suffit pour que tout marche. Sur nos machines on tourne entre 40 et 60 ms par image, ce qui donne 15 à 17 images par seconde quand le PC n'a que ça à faire. On a aussi ajouté YOLOv3-tiny comme deuxième modèle : il est un peu moins bon, mais ça permet de montrer le changement de modèle à chaud depuis la page web.
 
-### 3.3 Emplacement du traitement : sur une machine dédiée
+### 3.3 Où faire tourner le modèle
 
-Faire tourner le modèle sur le PC capture aurait concentré toute la charge sur une seule machine et vidé l'architecture distribuée de son sens. Le traitement déporté a trois avantages : le PC capture reste léger (une webcam et Flask suffisent, un Raspberry Pi conviendrait), le calcul s'exécute sur la machine qui a le meilleur processeur, et les spectateurs n'ont rien à installer. Le coût est un saut réseau supplémentaire, mesuré à quelques dizaines de millisecondes sur un Wi-Fi correct.
+On aurait pu faire la détection directement sur le PC qui a la webcam. On ne l'a pas fait pour deux raisons : d'abord parce que ça revenait à tout mettre sur une seule machine, ce qui n'était pas le sujet ; ensuite parce que ça permet de mettre le calcul sur le PC le plus puissant du groupe, et de laisser le PC capture faire quelque chose de très léger. Le prix à payer, c'est un passage réseau en plus, qu'on a mesuré à quelques dizaines de millisecondes en Wi-Fi.
 
-### 3.4 Autres choix
+### 3.4 Quelques autres choix
 
-- **Flask** plutôt que FastAPI ou Node : déjà utilisé dans le script du TP, suffisant pour du MJPEG, et présent dans les dépôts Debian.
-- **JSON** pour les statistiques et les réglages : standard, lisible, testable avec `curl`.
-- **Lecture « dernière image seulement »** : `cv2.VideoCapture` met les images en file d'attente ; si l'analyse est plus lente que la caméra, cette file grossit et le retard s'accumule (plusieurs secondes après une minute). Un thread lit le flux au rythme de la caméra et jette les images non traitées : l'analyse porte toujours sur l'image la plus récente.
-- **Un seul encodage JPEG par image** quel que soit le nombre de spectateurs (`DiffuseurMJPEG`), avec une variable de condition pour réveiller les clients : un spectateur lent saute des images au lieu de ralentir les autres.
+On a gardé Flask parce que c'était dans le script du TP et que ça suffit largement. Les statistiques et les réglages passent en JSON, ce qui se teste facilement avec `curl`.
 
-## 4. Difficultés rencontrées et solutions
+Un choix moins visible mais qui a beaucoup compté : dans `lecture_http.py`, on ne traite que la dernière image reçue. `cv2.VideoCapture` met les images dans une file d'attente, et si le modèle est plus lent que la caméra, cette file grossit et le retard s'accumule. Au bout d'une minute on avait plusieurs secondes de décalage. Avec un thread qui lit au rythme de la caméra et qui jette les images qu'on n'a pas eu le temps de traiter, le retard reste constant.
 
-| Difficulté | Diagnostic | Solution |
-|---|---|---|
-| **Le PC d'analyse n'atteint pas le PC capture** : `curl` expire, `ping` échoue, alors que la table ARP voit bien la machine | Un délai d'attente silencieux (et non un « connection refused » immédiat) trahit un **pare-feu** qui rejette les paquets sur le PC capture | Autoriser le port en entrée (règle Windows ou `ufw`). Documenté dans le README avec la méthode de diagnostic `ping` / `curl` |
-| **La source RTSP publique du script d'origine** (`BigBuckBunny`) ne répond plus | Serveur de démonstration hors ligne | Remplacée par la webcam ; possibilité de diffuser un fichier vidéo avec `--camera fichier.mp4` |
-| **`diffusion_rtsp_ffmpeg.py` échoue** avec « Connection refused » | Le drapeau `-rtsp_flags listen` n'agit que sur la *lecture* RTSP avec ffmpeg 5.1 ; en *écriture*, ffmpeg se comporte en client et cherche un serveur RTSP inexistant. Vérifié avec quatre combinaisons d'options | ffmpeg sert lui-même le flux H.264 en HTTP (`-listen 1`, MPEG-TS) ; mode `--mode rtsp` conservé pour pousser vers un serveur externe (mediamtx). Entrée adaptée à l'OS (`avfoundation` n'existe que sur macOS) |
-| **`diffusion_gstreamer.py` n'est joignable que localement** et ne démarre pas | `tcpserversink host=127.0.0.1` n'écoute que sur la boucle locale ; l'encodeur `x264enc` refuse le format `BGR` demandé | `host=0.0.0.0`, format `I420`, redimensionnement systématique à la taille annoncée au `VideoWriter` |
-| **Un seul client peut lire la webcam** | Caméra ouverte dans `generate_frames()`, donc une fois par client | Caméra ouverte une seule fois, thread de capture, image partagée |
-| **Retard qui s'accumule** quand le modèle est plus lent que la caméra | File d'attente interne de `VideoCapture` | Lecteur « dernière image seulement » (§ 3.4) |
-| **Adresse IP qui change** entre deux séances (DHCP, partage de connexion) | La valeur écrite dans `config.py` devient fausse | Les scripts affichent leur adresse au démarrage ; option `--source` ; QR code de l'interface dans le terminal |
-| **Fenêtre OpenCV sur une machine sans écran** | `cv2.imshow` lève une exception | Fenêtre optionnelle : l'exception est rattrapée et l'analyse continue, la page web suffit |
-| **Changer de modèle sans interrompre l'analyse** | Le réseau est utilisé par le thread d'analyse pendant que le serveur web le remplace | Le nouveau réseau est construit hors verrou, puis substitué entre deux inférences |
+Dans le même esprit, l'image annotée est encodée en JPEG une seule fois, quel que soit le nombre de gens qui regardent. Chaque spectateur est réveillé quand une nouvelle image est prête ; s'il est lent, il saute des images au lieu de ralentir les autres.
+
+## 4. Ce qui nous a posé problème
+
+**Le pare-feu.** C'est ce qui nous a fait perdre le plus de temps. Au premier essai à deux PC, le PC analyse n'arrivait pas à joindre le PC capture : la commande `curl` attendait puis abandonnait, et même le `ping` ne passait pas. On a d'abord cru que le Wi-Fi isolait les machines entre elles. En regardant la table ARP, on a vu que les deux PC se voyaient bien au niveau bas, donc le blocage était logiciel. Un délai qui expire sans message d'erreur, au lieu d'un « connection refused » immédiat, c'est la signature d'un pare-feu qui jette les paquets. Une fois le port ouvert sur le PC capture, tout est passé. On a mis la méthode de diagnostic dans le README.
+
+**Le serveur RTSP du script d'origine.** `diffusion_http.py` lisait au départ une vidéo de démonstration (BigBuckBunny) sur un serveur public. Ce serveur ne répond plus. On l'a remplacé par la webcam, et on a gardé la possibilité de diffuser un fichier vidéo avec `--camera fichier.mp4`, ce qui nous a servi pour les tests et pour la figure 3.
+
+**Le script ffmpeg.** `diffusion_rtsp_ffmpeg.py` était prévu pour macOS (le périphérique `avfoundation` n'existe pas sous Linux ni Windows) et utilisait l'option `-rtsp_flags listen` pour que ffmpeg serve lui-même le flux RTSP. Chez nous, avec ffmpeg 5.1, cette option ne fait rien en écriture : ffmpeg se comporte comme un client et cherche un serveur RTSP qui n'existe pas, d'où un « Connection refused ». On a testé quatre façons d'écrire la commande avant de comprendre. La solution qu'on a retenue est de faire servir le flux H.264 par ffmpeg en HTTP avec `-listen 1`, ce qui marche sans rien installer d'autre. On a gardé un mode `--mode rtsp` pour pousser vers un vrai serveur RTSP si on en a un.
+
+**Le script GStreamer.** Il écoutait sur `127.0.0.1`, donc uniquement en local, et demandait un format d'image BGR que l'encodeur x264 refuse. Une fois l'adresse passée à `0.0.0.0` et le format à I420, ça marche. On a aussi dû redimensionner les images à la taille annoncée au `VideoWriter`, sinon elles sont ignorées sans message.
+
+**L'adresse IP qui change.** Entre le partage de connexion d'un téléphone et le Wi-Fi de l'école, chaque PC change d'adresse. On a fini par faire afficher l'adresse par les scripts au démarrage, avec un QR code de la page web dans le terminal du PC analyse, pour ne plus avoir à la dicter.
+
+**Changer de modèle sans couper le flux.** Le réseau est utilisé par le thread d'analyse pendant que la page web demande de le remplacer. On construit le nouveau réseau à côté, puis on l'échange contre l'ancien entre deux inférences, avec un verrou. Le flux ne s'arrête pas, on voit juste la latence changer.
+
+**La fenêtre OpenCV.** `cv2.imshow` plante sur une machine sans écran. On a rendu la fenêtre optionnelle : si elle ne peut pas s'ouvrir, le script continue et la page web suffit.
 
 ## 5. Mesures
 
-Mesures réalisées sur un portable Debian 12 (processeur seul, sans GPU), les trois rôles sur la même machine, webcam 640×480.
+Ces mesures ont été faites sur un portable sous Debian 12, sans carte graphique, avec une webcam en 640×480.
 
-| Configuration | Latence d'inférence | Débit d'analyse |
+| Configuration | Temps de calcul par image | Images par seconde |
 |---|---|---|
-| YOLOv4-tiny, entrée 416 px | 51 à 63 ms | 14 à 17 images/s |
-| YOLOv4-tiny, entrée 320 px | 25 à 38 ms | limité par la caméra (≈ 17 images/s) |
-| YOLOv3-tiny, entrée 416 px | ≈ 80 ms (machine chargée) | comparable à v4-tiny dans les mêmes conditions |
-| Débit du flux MJPEG brut (640×480, JPEG 80 %) | — | 1,44 Mbit/s |
-| Deux spectateurs simultanés sur le flux annoté | — | 49 images chacun en 3 s, aucune dégradation |
-| Coupure puis retour de la capture | reconnexion automatique en ≈ 2 s | — |
+| YOLOv4-tiny, entrée 416 px | 51 à 63 ms | 14 à 17 |
+| YOLOv4-tiny, entrée 320 px | 25 à 38 ms | limité par la caméra, environ 17 |
+| YOLOv3-tiny, entrée 416 px | environ 80 ms | du même ordre que YOLOv4-tiny |
+| YOLOv4-tiny, essai à trois personnes (figure 2) | 104 ms | 7 |
 
-*À compléter en séance, sur la configuration réelle à deux PC + téléphone :* latence de bout en bout (chronomètre filmé), images/s côté analyse, nombre de spectateurs simultanés.
+Le débit du flux MJPEG brut est de 1,44 Mbit/s en 640×480 avec une qualité JPEG de 80. Avec deux spectateurs en même temps sur le flux annoté, chacun reçoit le même nombre d'images (49 en 3 secondes dans notre test), donc le deuxième ne ralentit pas le premier. Quand on coupe le PC capture puis qu'on le relance, le PC analyse se reconnecte tout seul en deux secondes environ.
 
-## 6. Au-delà de la demande initiale
+La latence de bout en bout, entre le moment où quelque chose se passe devant la webcam et le moment où on le voit sur le téléphone, est de l'ordre de la demi-seconde en Wi-Fi. On la mesurera plus précisément en séance en filmant un chronomètre.
 
-Toutes ces fonctions sont **opérationnelles** et se montrent en séance :
+## 6. Ce qu'on a ajouté en plus
 
-- **Interface web** adaptée au téléphone, sans dépendance externe ;
-- **Réglages à chaud** depuis l'interface : seuil de confiance, taille d'entrée du réseau, **filtre des classes** à détecter, **changement de modèle** (YOLOv4-tiny ↔ YOLOv3-tiny) sans redémarrage ni interruption du flux ;
-- **Indicateurs en direct** : images/s, latence d'inférence, nombre d'objets et compteur par classe, bandeau incrusté dans la vidéo ;
-- **Plusieurs spectateurs simultanés**, un seul encodage par image ;
-- **Reprise automatique** après coupure de la caméra, du réseau ou du flux, côté capture, analyse et page web ;
-- **Maîtrise de la latence** par la lecture « dernière image seulement » ;
-- **Réduction du débit** : qualité JPEG et résolution réglables, variantes H.264 ;
-- **Plusieurs sources** : webcam, fichier vidéo, flux HTTP/RTSP/GStreamer, mire de test ;
-- **QR code** de l'interface affiché dans le terminal du PC d'analyse : un spectateur le scanne au lieu de taper l'adresse ;
-- **Supervision** : `/etat` et `/stats` en JSON, messages de diagnostic explicites dans les terminaux.
+En plus de la chaîne de base, on a ajouté plusieurs choses qui rendent le système plus agréable à utiliser, et qu'on peut montrer en séance :
+
+- les réglages se changent depuis la page web sans rien relancer : seuil de confiance, taille d'entrée du réseau (320, 416 ou 608), classes à détecter, et modèle (YOLOv4-tiny ou YOLOv3-tiny) ;
+- les images par seconde, le temps de calcul et le nombre d'objets par classe sont affichés en direct ;
+- plusieurs personnes peuvent regarder en même temps ;
+- si la caméra ou le réseau coupe, tout se reconnecte seul, y compris la page web ;
+- on ne traite que la dernière image reçue, donc le retard ne s'accumule pas ;
+- la qualité JPEG et la résolution se règlent pour réduire le débit, et il y a deux variantes H.264 ;
+- le PC capture peut diffuser une webcam, un fichier vidéo ou un flux existant, et on peut avoir plusieurs PC capture ;
+- un QR code de la page web s'affiche dans le terminal du PC analyse.
 
 ## 7. Limites
 
-- Le serveur web est celui de développement de Flask : adapté à une démonstration, pas à une mise en production.
-- Le MJPEG consomme environ 1,4 Mbit/s par spectateur en 640×480 ; le débit total croît linéairement avec le nombre de spectateurs. Les variantes H.264 réduisent ce débit mais ne sont pas lisibles dans un navigateur.
-- YOLOv4-tiny est moins précis qu'un modèle complet, surtout sur les objets petits ou partiellement masqués ; la latence de bout en bout typique est de 200 à 500 ms sur un Wi-Fi correct.
-- En mode ffmpeg HTTP, un seul lecteur à la fois (suffisant, puisque la consultation passe par le PC d'analyse).
-- Aucune authentification : toute personne connectée au réseau peut voir le flux et modifier les réglages.
-- Certains points d'accès Wi-Fi (partages de connexion, réseaux publics) isolent les clients entre eux ; la démonstration exige un réseau qui autorise le trafic entre machines.
+Le serveur web est celui de développement de Flask, ce qui va bien pour une démonstration mais pas pour quelque chose qui tournerait en permanence. Le MJPEG consomme environ 1,4 Mbit/s par spectateur, donc avec beaucoup de spectateurs ça finirait par peser sur le Wi-Fi. YOLOv4-tiny se trompe parfois sur les petits objets ou quand une personne est en partie cachée. Il n'y a aucune authentification : tous ceux qui sont sur le réseau peuvent voir le flux et changer les réglages. Enfin, certains points d'accès Wi-Fi isolent les clients entre eux, et dans ce cas rien ne marche ; on a prévu un partage de connexion en secours.
 
-## 8. Procédure d'exécution
+## 8. Pour lancer le projet
 
-La procédure complète (installation par système, ordre de démarrage, adresses et ports à adapter, dépannage) se trouve dans le fichier `README.md` du dépôt. En résumé :
-
-```bash
-# PC capture
-python diffusion_http.py
-# PC analyse (adresse affichée par le PC capture)
-python lecture_http.py --source http://<IP capture>:5000/video_feed
-# Consultation : ouvrir http://<IP analyse>:8000/ dans un navigateur
-```
+La procédure détaillée est dans le `README.md` du dépôt. En résumé, sur le PC capture on lance `python diffusion_http.py`, qui affiche l'adresse du flux ; sur le PC analyse on lance `python lecture_http.py --source http://<adresse du PC capture>:5000/video_feed`, qui affiche l'adresse de la page web ; et on ouvre cette adresse dans un navigateur sur n'importe quel appareil du réseau.
 
 ## 9. Conclusion
 
-La chaîne capture → analyse → consultation fonctionne sur trois machines distinctes, en direct, et le résultat annoté est accessible à tout appareil du réseau avec un simple navigateur. Les choix (MJPEG/HTTP, YOLOv4-tiny sur OpenCV, traitement déporté) ont été faits après avoir implémenté et mesuré les alternatives, et les scripts fournis en TP ont été conservés et adaptés plutôt que réécrits. Les difficultés rencontrées, pour l'essentiel réseau (pare-feu, adresses, isolation) et liées au comportement réel des outils (ffmpeg, GStreamer, `VideoCapture`), ont chacune trouvé une solution intégrée au code ou à la documentation.
+On a une chaîne complète qui tourne sur trois machines différentes, et le résultat est visible depuis n'importe quel téléphone du réseau sans rien installer. Les choix qu'on a faits (MJPEG plutôt que RTSP, YOLOv4-tiny plutôt qu'un modèle plus gros, le calcul sur une machine à part) viennent de ce qu'on a testé et mesuré, pas seulement de ce qu'on a lu. La plupart des difficultés étaient des problèmes de réseau ou de comportement réel des outils, plus que des problèmes d'IA, et c'est sans doute ce qu'on retient le plus de ce projet.
