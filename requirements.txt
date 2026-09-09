@@ -2,3 +2,4 @@
 flask>=2.0
 opencv-python>=4.5
 numpy>=1.20
+qrcode>=7.0        # facultatif : QR code de l'interface web dans le terminal

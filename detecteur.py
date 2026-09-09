@@ -6,8 +6,11 @@ Charge le modèle une fois, puis :
   - `annoter(image, detections)` -> dessine les boîtes et étiquettes
 
 Les réglages `seuil_confiance`, `taille_entree` et `classes_filtre` peuvent
-être modifiés à tout moment (c'est ce que fait l'interface web).
+être modifiés à tout moment, et le modèle lui-même peut être remplacé à chaud
+avec `charger_modele()` (c'est ce que fait l'interface web).
 """
+import threading
+
 import cv2
 import numpy as np
 
@@ -19,12 +22,12 @@ class DetecteurYOLO:
         with open(chemin_classes, encoding="utf-8") as f:
             self.classes = [ligne.strip() for ligne in f if ligne.strip()]
 
-        # Reconstruction du réseau à partir de l'architecture (.cfg) et des
-        # poids appris (.weights), exécution sur CPU.
-        self._reseau = cv2.dnn.readNetFromDarknet(chemin_cfg, chemin_poids)
-        self._reseau.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        self._reseau.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-        self._couches_sortie = self._reseau.getUnconnectedOutLayersNames()
+        # Le réseau est utilisé par le thread d'analyse et remplacé par le
+        # serveur web : le verrou évite de changer de modèle en pleine inférence.
+        self._verrou = threading.Lock()
+        self._reseau = None
+        self._couches_sortie = ()
+        self.charger_modele(chemin_cfg, chemin_poids)
 
         # Réglages modifiables à chaud
         self.taille_entree = taille_entree
@@ -37,6 +40,20 @@ class DetecteurYOLO:
         self._couleurs = generateur.integers(80, 255, size=(len(self.classes), 3))
 
     # ------------------------------------------------------------------ #
+    def charger_modele(self, chemin_cfg, chemin_poids):
+        """Charge un réseau Darknet (ou le remplace à chaud).
+
+        Le nouveau réseau est construit hors verrou (cela prend ~0,5 s), puis
+        substitué à l'ancien entre deux inférences : l'analyse ne s'interrompt pas.
+        """
+        reseau = cv2.dnn.readNetFromDarknet(chemin_cfg, chemin_poids)
+        reseau.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)   # moteur OpenCV
+        reseau.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)        # calcul sur CPU
+        with self._verrou:
+            self._reseau = reseau
+            self._couches_sortie = reseau.getUnconnectedOutLayersNames()
+
+    # ------------------------------------------------------------------ #
     def detecter(self, image):
         """Renvoie une liste de dict : {"classe", "confiance", "boite": (x, y, w, h)}."""
         hauteur, largeur = image.shape[:2]
@@ -47,10 +64,11 @@ class DetecteurYOLO:
         #    taille attendue, passage BGR (OpenCV) -> RGB (YOLO).
         blob = cv2.dnn.blobFromImage(image, 1 / 255.0, (taille, taille),
                                      swapRB=True, crop=False)
-        self._reseau.setInput(blob)
 
         # 2) Passage dans le réseau
-        sorties = self._reseau.forward(self._couches_sortie)
+        with self._verrou:
+            self._reseau.setInput(blob)
+            sorties = self._reseau.forward(self._couches_sortie)
 
         # 3) Décodage : chaque ligne = [cx, cy, w, h, objectness, score_classe_0..79]
         boites, confiances, indices_classes = [], [], []

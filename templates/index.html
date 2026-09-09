@@ -69,6 +69,9 @@
 
     <div class="carte">
       <h2>Réglages (appliqués à chaud)</h2>
+      <label>Modèle de détection</label>
+      <select id="modele"></select>
+
       <label>Seuil de confiance : <b id="seuilValeur">0.50</b></label>
       <input type="range" id="seuil" min="0.05" max="0.95" step="0.05" value="0.5">
 
@@ -89,7 +92,7 @@
 </main>
 
 <footer>
-  Source : <code id="source">…</code> &middot; résolution <span id="resolution">–</span>
+  Source : <code id="source">…</code> &middot; modèle <b id="modeleActif">–</b> &middot; résolution <span id="resolution">–</span>
   &middot; flux seul : <code>/video_feed</code> &middot; stats : <code>/stats</code>
 </footer>
 
@@ -104,6 +107,7 @@
       $('latence').textContent = s.latence_ms;
       $('nb').textContent = s.nb_objets;
       $('source').textContent = s.source;
+      $('modeleActif').textContent = s.modele || '–';
       $('resolution').textContent = s.resolution || '–';
       const badge = $('etat');
       badge.classList.toggle('ok', s.source_connectee);
@@ -126,6 +130,8 @@
   $('seuil').addEventListener('input', e => $('seuilValeur').textContent = (+e.target.value).toFixed(2));
 
   function afficherParametres(p) {
+    $('modele').innerHTML = Object.entries(p.modeles_possibles).map(([nom, desc]) =>
+      `<option value="${nom}" ${nom === p.modele ? 'selected' : ''}>${nom} — ${desc}</option>`).join('');
     $('seuil').value = p.seuil_confiance;
     $('seuilValeur').textContent = (+p.seuil_confiance).toFixed(2);
     $('taille').innerHTML = p.tailles_possibles.map(t =>
@@ -149,6 +155,7 @@
   }
 
   $('appliquer').addEventListener('click', () => envoyerParametres({
+    modele: $('modele').value,
     seuil_confiance: $('seuil').value,
     taille_entree: $('taille').value,
     classes: $('classes').value

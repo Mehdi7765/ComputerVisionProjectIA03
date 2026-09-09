@@ -71,9 +71,27 @@ QUALITE_JPEG = 80
 #  MODÈLE YOLO
 # ---------------------------------------------------------------------------
 DOSSIER_MODELES = os.path.join(DOSSIER_PROJET, "modeles")
-FICHIER_CFG     = os.path.join(DOSSIER_MODELES, "yolov4-tiny.cfg")
-FICHIER_POIDS   = os.path.join(DOSSIER_MODELES, "yolov4-tiny.weights")
-FICHIER_CLASSES = os.path.join(DOSSIER_MODELES, "coco.names")
+FICHIER_CLASSES = os.path.join(DOSSIER_MODELES, "coco.names")   # 80 classes, communes aux modèles
+
+# Modèles disponibles (changement possible à chaud depuis l'interface web).
+# Tous sont au format Darknet (.cfg + .weights) et entraînés sur COCO.
+MODELES = {
+    "yolov4-tiny": {"cfg": "yolov4-tiny.cfg", "poids": "yolov4-tiny.weights",
+                    "description": "équilibré, le plus précis des deux (défaut)"},
+    "yolov3-tiny": {"cfg": "yolov3-tiny.cfg", "poids": "yolov3-tiny.weights",
+                    "description": "plus ancien, un peu plus rapide, moins précis"},
+}
+MODELE_DEFAUT = "yolov4-tiny"
+
+
+def chemins_modele(nom):
+    """Renvoie (chemin_cfg, chemin_poids) du modèle `nom` (clé de MODELES)."""
+    m = MODELES[nom]
+    return (os.path.join(DOSSIER_MODELES, m["cfg"]),
+            os.path.join(DOSSIER_MODELES, m["poids"]))
+
+
+FICHIER_CFG, FICHIER_POIDS = chemins_modele(MODELE_DEFAUT)
 
 # Taille de l'image en entrée du réseau. Compromis vitesse / précision :
 #   320 = rapide, 416 = équilibré, 608 = précis mais lent.

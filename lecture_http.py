@@ -52,7 +52,7 @@ diffuseur = DiffuseurMJPEG(qualite_jpeg=config.QUALITE_JPEG)
 detecteur = None            # créé au lancement (chargement du modèle)
 compteur = CompteurFPS()
 stats = {
-    "source": "", "source_connectee": False, "resolution": "",
+    "source": "", "source_connectee": False, "resolution": "", "modele": "",
     "fps": 0.0, "latence_ms": 0, "nb_objets": 0, "objets_par_classe": {},
 }
 
@@ -151,6 +151,8 @@ def stats_json():
 
 def parametres_courants():
     return {
+        "modele": stats["modele"],
+        "modeles_possibles": {nom: m["description"] for nom, m in config.MODELES.items()},
         "seuil_confiance": detecteur.seuil_confiance,
         "taille_entree": detecteur.taille_entree,
         "tailles_possibles": list(config.TAILLES_ENTREE_POSSIBLES),
@@ -165,6 +167,15 @@ def parametres():
     if request.method == "POST":
         donnees = request.get_json(silent=True) or {}
         erreurs = []
+
+        if "modele" in donnees and donnees["modele"] != stats["modele"]:
+            nom = str(donnees["modele"])
+            if nom not in config.MODELES:
+                erreurs.append(f"modèle inconnu : {nom} (choix : {', '.join(config.MODELES)})")
+            else:
+                detecteur.charger_modele(*config.chemins_modele(nom))   # remplacement à chaud
+                stats["modele"] = nom
+                print(f"Modèle changé : {nom}")
 
         if "seuil_confiance" in donnees:
             try:
@@ -212,14 +223,17 @@ if __name__ == "__main__":
     parseur.add_argument("--seuil", type=float, default=config.SEUIL_CONFIANCE)
     parseur.add_argument("--taille", type=int, default=config.TAILLE_ENTREE,
                          choices=config.TAILLES_ENTREE_POSSIBLES)
+    parseur.add_argument("--modele", default=config.MODELE_DEFAUT, choices=list(config.MODELES),
+                         help="modèle de détection (changeable ensuite depuis l'interface)")
     parseur.add_argument("--sans-fenetre", action="store_true",
                          help="ne pas ouvrir de fenêtre locale (la page web suffit)")
     args = parseur.parse_args()
 
-    print("Chargement du modèle YOLOv4-tiny...")
-    detecteur = DetecteurYOLO(config.FICHIER_CFG, config.FICHIER_POIDS, config.FICHIER_CLASSES,
+    print(f"Chargement du modèle {args.modele}...")
+    detecteur = DetecteurYOLO(*config.chemins_modele(args.modele), config.FICHIER_CLASSES,
                               taille_entree=args.taille, seuil_confiance=args.seuil,
                               seuil_nms=config.SEUIL_NMS)
+    stats["modele"] = args.modele
     reduire_logs_flask()
 
     # [MODIF] le serveur web tourne dans un thread de fond ; la lecture reste
@@ -240,5 +254,14 @@ if __name__ == "__main__":
     print(f"  Flux annoté seul :    http://{ip}:{args.port}/video_feed")
     print("  (touche q dans la fenêtre ou Ctrl+C pour arrêter)")
     print("=" * 62)
+    # [MODIF] QR code de l'interface web : un spectateur (téléphone) n'a qu'à
+    # le scanner au lieu de taper l'adresse. Facultatif (pip install qrcode).
+    try:
+        import qrcode
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(f"http://{ip}:{args.port}/")
+        qr.print_ascii(invert=True)
+    except ImportError:
+        pass
 
     read_http_stream(video_url, afficher=not args.sans_fenetre)

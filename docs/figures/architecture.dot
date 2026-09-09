@@ -1,0 +1,30 @@
+digraph architecture {
+  rankdir=LR; splines=spline; nodesep=0.45; ranksep=1.4;
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11, fillcolor="#ffffff", color="#4a5568", width=2.3];
+  edge [fontname="Helvetica", fontsize=9, color="#2b6cb0", penwidth=1.6];
+
+  subgraph cluster_capture {
+    label="PC CAPTURE\n(ex. 192.168.1.20)"; fontname="Helvetica-Bold"; fontsize=12; style="rounded,filled"; fillcolor="#ebf8ff"; color="#90cdf4";
+    webcam    [label="Webcam USB\n640×480"];
+    diffusion [label="diffusion_http.py\nFlask + OpenCV\nport 5000", fillcolor="#f4f6fa"];
+    { rank=same; webcam; diffusion; }
+    webcam -> diffusion [label=" images BGR", color="#4a5568"];
+  }
+  subgraph cluster_analyse {
+    label="PC ANALYSE\n(ex. 192.168.1.30)"; fontname="Helvetica-Bold"; fontsize=12; style="rounded,filled"; fillcolor="#f0fff4"; color="#9ae6b4";
+    lecture [label="lecture_http.py\nlecture « dernière image »", fillcolor="#f4f6fa"];
+    yolo    [label="detecteur.py\nYOLOv4-tiny (OpenCV DNN)\n≈ 40–90 ms / image"];
+    web     [label="diffuseur.py + Flask\ninterface web, port 8000", fillcolor="#f4f6fa"];
+    { rank=same; lecture; yolo; web; }
+    lecture -> yolo [label=" image", color="#4a5568"];
+    yolo -> web [label=" image annotée\n + statistiques", color="#4a5568"];
+  }
+  subgraph cluster_consult {
+    label="CONSULTATION\n(tout appareil du réseau)"; fontname="Helvetica-Bold"; fontsize=12; style="rounded,filled"; fillcolor="#fffaf0"; color="#fbd38d";
+    tel [label="Téléphone / PC\nnavigateur web\n(aucun logiciel à installer)"];
+  }
+
+  diffusion -> lecture [label="HTTP MJPEG\n/video_feed (flux brut)\n≈ 1,5 Mbit/s"];
+  web -> tel [label="HTTP MJPEG + page web\n/  /video_feed  /stats"];
+  tel -> web [label="réglages à chaud\n/parametres (JSON)", style=dashed, color="#c05621", fontcolor="#c05621"];
+}

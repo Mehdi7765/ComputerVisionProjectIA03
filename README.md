@@ -48,8 +48,11 @@ Deux **variantes de diffusion** en H.264 (débit plus faible, mais non lisibles 
 | `diffuseur.py` | ajouté | Classe `DiffuseurMJPEG` : diffusion d'un flux vers plusieurs spectateurs |
 | `utilitaires.py` | ajouté | IP locale, ouverture de source, lecture « dernière image », compteur d'images/s |
 | `templates/index.html` | ajouté | Interface web de consultation |
-| `modeles/` | ajouté | YOLOv4-tiny (`.cfg`, `.weights`) et les 80 classes (`coco.names`) — **inclus, rien à télécharger** |
+| `modeles/` | ajouté | YOLOv4-tiny et YOLOv3-tiny (`.cfg`, `.weights`) et les 80 classes (`coco.names`) — **inclus, rien à télécharger** |
 | `docs/scripts_origine/` | TP | Les 4 scripts **tels que fournis**, non modifiés |
+| `docs/rapport.md` / `rapport.pdf` | ajouté | Rapport du projet (description, justification des choix, difficultés, mesures) |
+| `docs/checklist_demo.md` | ajouté | Déroulé de la démonstration et plans B |
+| `docs/figures/`, `docs/captures/` | ajouté | Schéma d'architecture, captures d'écran de l'interface |
 | `docs/` | — | Grille d'évaluation |
 | `requirements.txt` | ajouté | Dépendances Python |
 
@@ -110,8 +113,9 @@ Tout est dans **`config.py`**. Les valeurs à connaître :
 | `QUALITE_JPEG` | `80` | Compression des images MJPEG (plus bas = moins de débit) |
 | `TAILLE_ENTREE` | `416` | Taille d'entrée du réseau : 320 (rapide) / 416 / 608 (précis) |
 | `SEUIL_CONFIANCE` | `0.5` | Confiance minimale pour afficher une détection |
+| `MODELES`, `MODELE_DEFAUT` | `yolov4-tiny` | Modèles disponibles (`yolov4-tiny`, `yolov3-tiny`), changeables depuis l'interface |
 
-**Pas besoin d'éditer le fichier en séance** : chaque script accepte des options qui prennent le dessus, par exemple `--source`, `--port`, `--camera`, `--seuil`, `--taille`. Voir `python lecture_http.py --help`.
+**Pas besoin d'éditer le fichier en séance** : chaque script accepte des options qui prennent le dessus, par exemple `--source`, `--port`, `--camera`, `--seuil`, `--taille`, `--modele`. Voir `python lecture_http.py --help`.
 
 ### Trouver l'adresse IP d'une machine
 
@@ -160,7 +164,9 @@ Le terminal affiche :
   Interface web :       http://192.168.1.30:8000/   <- à ouvrir sur n'importe quel appareil
 ```
 
-Une fenêtre locale montre aussi le résultat (touche `q` pour quitter) ; `--sans-fenetre` la désactive, par exemple sur une machine sans écran. Options utiles : `--taille 320` (plus rapide), `--seuil 0.6` (moins de fausses détections).
+Le terminal affiche aussi un **QR code** de l'interface web : un spectateur n'a qu'à le scanner avec son téléphone (nécessite `pip install qrcode`, inclus dans `requirements.txt`).
+
+Une fenêtre locale montre aussi le résultat (touche `q` pour quitter) ; `--sans-fenetre` la désactive, par exemple sur une machine sans écran. Options utiles : `--taille 320` (plus rapide), `--seuil 0.6` (moins de fausses détections), `--modele yolov3-tiny`.
 
 ### Étape 3 — Consultation (téléphone, PC du prof, n'importe quoi)
 
@@ -234,7 +240,8 @@ curl -m 5 http://192.168.1.20:5000/etat    # le serveur répond-il ?
 
 **Au-delà de la demande**
 - **Interface web** claire et adaptée au téléphone : flux, statistiques, réglages.
-- **Réglages à chaud** sans redémarrer : seuil de confiance, taille d'entrée du réseau (vitesse ⇄ précision), **filtre des classes** à détecter.
+- **Réglages à chaud** sans redémarrer : seuil de confiance, taille d'entrée du réseau (vitesse ⇄ précision), **filtre des classes** à détecter, **changement de modèle** (YOLOv4-tiny ↔ YOLOv3-tiny) sans interruption du flux.
+- **QR code** de l'interface affiché dans le terminal du PC d'analyse.
 - **Indicateurs en direct** : images/s, latence d'inférence (ms), nombre d'objets, compteur par classe ; bandeau incrusté dans la vidéo.
 - **Plusieurs spectateurs simultanés** : la source n'est lue et encodée qu'une fois, chaque spectateur reçoit la dernière image (un spectateur lent ne ralentit pas les autres).
 - **Reprise automatique** : si la webcam ou le flux coupe, capture et analyse se reconnectent seuls ; la page web relance la vidéo d'elle-même.
